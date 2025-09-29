@@ -38,6 +38,8 @@ const uid = () => Math.random().toString(36).slice(2, 9);
 const toRem = (px: number, base: number) => +(px / base).toFixed(3);
 const ratioFrom = (lh: number, fontPx: number) =>
   lh <= 3 ? +lh.toFixed(3) : +(lh / fontPx).toFixed(3);
+// Коэффициент при vw в «rem + vw» должен учитывать базовый размер rem (px):
+// slopeVW = Δrem * (baseRemPx * 100) / Δpx
 const slopeRemPerVw = (
   remA: number,
   remB: number,
@@ -48,6 +50,8 @@ const slopeRemPerVw = (
   if (pxB === pxA) return 0;
   return +(((remB - remA) * base * 100) / (pxB - pxA)).toFixed(6);
 };
+// Свободный член (в rem), чтобы прямая проходила через точку при pxA:
+// intercept = remAtA - slopeVW * (pxA / 100) / baseRemPx
 const interceptRem = (
   remAtA: number,
   slopeVW: number,
@@ -78,6 +82,7 @@ const AutoResizeTextarea = ({
   };
   useLayoutEffect(() => {
     resize();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value]);
   return (
     <textarea
@@ -102,8 +107,6 @@ const CodeBlock = ({
 }) => {
   const [expanded, setExpanded] = useState(false);
   const [isOverflowing, setIsOverflowing] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const copyTimerRef = useRef<number | null>(null);
   const regionId = `code-${title.replace(/\s+/g, "-").toLowerCase()}`;
   const ref = useRef<HTMLDivElement | null>(null);
 
@@ -120,15 +123,6 @@ const CodeBlock = ({
     return () => ro.disconnect();
   }, [text]);
 
-  useLayoutEffect(() => {
-    return () => {
-      if (copyTimerRef.current) {
-        window.clearTimeout(copyTimerRef.current);
-        copyTimerRef.current = null;
-      }
-    };
-  }, []);
-
   const handleToggleExpand = () => {
     if (!isOverflowing && !expanded) return;
     setExpanded((v) => !v);
@@ -139,15 +133,6 @@ const CodeBlock = ({
       handleToggleExpand();
     }
   };
-  const handleCopyClick = () => {
-    onCopy();
-    setCopied(true);
-    if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current);
-    copyTimerRef.current = window.setTimeout(() => {
-      setCopied(false);
-      copyTimerRef.current = null;
-    }, 3000);
-  };
 
   return (
     <div className="panel">
@@ -155,13 +140,11 @@ const CodeBlock = ({
         <strong>{title}</strong>
         <div className="actions">
           <button
-            className={`btn ${copied ? "btn-success" : "btn-secondary"}`}
-            onClick={handleCopyClick}
-            aria-label={
-              copied ? `Скопировано ${title}` : `Скопировать ${title}`
-            }
+            className="btn btn-secondary"
+            onClick={onCopy}
+            aria-label={`Скопировать ${title}`}
           >
-            {copied ? "Скопировано" : "Копировать"}
+            Копировать
           </button>
         </div>
       </div>
@@ -219,24 +202,28 @@ export default function App() {
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
+  const recalcCssOverflow = () => {
+    const el = cssAreaRef.current;
+    if (!el) return;
+    const textarea = el.querySelector("textarea");
+    const contentHeight =
+      (textarea as HTMLTextAreaElement | null)?.scrollHeight || el.scrollHeight;
+    const capPx = Math.min(500, Math.round((window.innerHeight || 0) * 0.3));
+    setCssAreaOverflowing(contentHeight > capPx);
+    el.scrollTop = 0;
+  };
+
   useLayoutEffect(() => {
     const el = cssAreaRef.current;
     if (!el) return;
-    const check = () => {
-      const textarea = el.querySelector("textarea");
-      const contentHeight =
-        (textarea as HTMLTextAreaElement | null)?.scrollHeight ||
-        el.scrollHeight;
-      const capPx = Math.min(500, Math.round((window.innerHeight || 0) * 0.3));
-      setCssAreaOverflowing(contentHeight > capPx);
-    };
-    check();
-    const ro = new ResizeObserver(check);
+    recalcCssOverflow();
+    const ro = new ResizeObserver(recalcCssOverflow);
     ro.observe(el);
     const ta = el.querySelector("textarea");
     if (ta) ro.observe(ta);
-    const onResize = () => check();
+    const onResize = () => recalcCssOverflow();
     window.addEventListener("resize", onResize);
+    requestAnimationFrame(() => requestAnimationFrame(recalcCssOverflow));
     return () => {
       ro.disconnect();
       window.removeEventListener("resize", onResize);
@@ -271,27 +258,50 @@ export default function App() {
 
       const declRoot = parseDecls(rootBaseNoComments);
 
-      const midBlockMatch = css.match(
-        /@media\s*(?:screen\s+and\s+)?\(min-width:\s*(\d+)px\)\s*and\s*\(max-width:\s*(\d+)px\)\s*\{([\s\S]*?)\}/i
+      const twoSidedMatches = Array.from(
+        css.matchAll(
+          /@media\s*(?:screen\s+and\s+)?\(min-width:\s*(\d+)px\)\s*and\s*\(max-width:\s*(\d+)px\)\s*\{([\s\S]*?)\}/gi
+        )
       );
-      const smallBlockMatch = css.match(
+      const smallBlockMatchOneSided = css.match(
         /@media\s*(?:screen\s+and\s+)?\(max-width:\s*(\d+)px\)\s*\{([\s\S]*?)\}/i
       );
       const largeBlockMatch = css.match(
         /@media\s*(?:screen\s+and\s+)?\(min-width:\s*(\d+)px\)\s*\{([\s\S]*?)\}/i
       );
 
+      let midBlockMatch: RegExpMatchArray | undefined;
+      let smallBlockMatchTwoSided: RegExpMatchArray | undefined;
+      if (twoSidedMatches.length > 0) {
+        twoSidedMatches.sort((a, b) => Number(a[2]) - Number(b[2]));
+        smallBlockMatchTwoSided =
+          twoSidedMatches[0] as unknown as RegExpMatchArray;
+        midBlockMatch = twoSidedMatches[
+          twoSidedMatches.length - 1
+        ] as unknown as RegExpMatchArray;
+      }
+
       const midMin = midBlockMatch ? Number(midBlockMatch[1]) : undefined;
       const midMax = midBlockMatch ? Number(midBlockMatch[2]) : undefined;
-      const smallMax = smallBlockMatch ? Number(smallBlockMatch[1]) : undefined;
+      const smallMax = smallBlockMatchTwoSided
+        ? Number(smallBlockMatchTwoSided[2])
+        : smallBlockMatchOneSided
+        ? Number(smallBlockMatchOneSided[1])
+        : undefined;
       const largeMin = largeBlockMatch ? Number(largeBlockMatch[1]) : undefined;
 
       const declMid = midBlockMatch ? parseDecls(midBlockMatch[3]) : {};
-      const declSmall = smallBlockMatch ? parseDecls(smallBlockMatch[2]) : {};
+      const declSmall = smallBlockMatchTwoSided
+        ? parseDecls(smallBlockMatchTwoSided[3])
+        : smallBlockMatchOneSided
+        ? parseDecls(smallBlockMatchOneSided[2])
+        : {};
       const declLarge = largeBlockMatch ? parseDecls(largeBlockMatch[2]) : {};
 
+      // optionally set breakpoints if detected, ensure min < mid < max
       if (smallMax && midMin && midMax) {
         const DEFAULT_MIN = 375;
+        // Prefer a conventional mobile width, but ensure it's < mid
         let minCandidate = Math.min(DEFAULT_MIN, smallMax);
         if (minCandidate >= midMin) {
           minCandidate = Math.max(320, Math.min(DEFAULT_MIN, midMin - 1));
@@ -328,6 +338,7 @@ export default function App() {
       };
 
       const calcFactor = (val: string) => {
+        // capture multiplicative factor after (100vw - XXrem) * factor
         const m = val.match(/\(100vw\s*-\s*\d+rem\)\s*\*\s*([\d.]+)/i);
         if (m) return parseFloat(m[1]);
         return 1;
@@ -348,10 +359,12 @@ export default function App() {
             : 16;
           const lhMax = baseLhStr ? parseFloat(baseLhStr) : 1.25;
 
+          // mid and min from clamp first args inside corresponding media
           const midVal = declMid[nameVar];
           const minVal = declSmall[nameVar];
           const midRem = midVal ? clampFirstArgRem(midVal) : undefined;
           const minRem = minVal ? clampFirstArgRem(minVal) : undefined;
+          // if base wasn't parsed, try to recover max from clamp third arg
           if (!sizeMaxRem && midVal) sizeMaxRem = clampLastArgRem(midVal);
           const sizeMidPx = midRem
             ? remToPx(String(midRem))
@@ -450,6 +463,7 @@ export default function App() {
       baseLines.push(`\t--${t.name}: ${sMax}rem;`);
       baseLines.push(`\t--${t.name}-lh: ${lhMax};`);
 
+      // Если диапазон вырожденный, удерживаем константу (slope=0, intercept=rem)
       const slopeMinMid = slopeRemPerVw(sMin, sMid, minPx, midPx, baseRemPx);
       const icptMinMid = interceptRem(sMin, slopeMinMid, minPx, baseRemPx);
       const slopeMidMax = slopeRemPerVw(sMid, sMax, midPx, maxPx, baseRemPx);
@@ -491,6 +505,7 @@ export default function App() {
       mixinLines.push("}\n");
     }
 
+    // compose: base :root, then separate @media blocks containing :root
     baseLines.push("}");
 
     const midBlock: string[] = [];
@@ -503,7 +518,9 @@ export default function App() {
     midBlock.push(`}`);
 
     const smallBlock: string[] = [];
-    smallBlock.push(`@media (max-width: ${midPx - 1}px) {`);
+    smallBlock.push(
+      `@media (min-width: ${minPx}px) and (max-width: ${midPx - 1}px) {`
+    );
     smallBlock.push(`\t:root {`);
     smallBlock.push(...smallLines);
     smallBlock.push(`\t}`);
@@ -669,7 +686,13 @@ export default function App() {
                   <AutoResizeTextarea
                     ariaLabel="css-compat"
                     value={compatCss}
-                    onChange={setCompatCss}
+                    onChange={(v) => {
+                      setCompatCss(v);
+                      // двойной rAF для стабильного auto-resize и пересчёта переполнения
+                      requestAnimationFrame(() =>
+                        requestAnimationFrame(recalcCssOverflow)
+                      );
+                    }}
                     placeholder=":root {\n  --token: 1rem;\n  --token-lh: 1.25;\n  @media (min-width: 1024px) and (max-width: 1440px) {\n    --token: clamp(1rem, 1rem + 0vw, 1rem);\n    --token-lh: 1.25;\n  }\n  @media (max-width: 1023px) {\n    --token: clamp(1rem, 1rem + 0vw, 1rem);\n    --token-lh: 1.25;\n  }\n  @media (min-width: 1441px) {\n    --token: calc(1rem + (0 * (100vw - 90rem) * 1));\n  }\n}"
                   />
                   {!cssInputExpanded && cssAreaOverflowing && (

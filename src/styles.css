@@ -177,6 +177,16 @@ button:disabled {
     filter 160ms ease;
   z-index: 2;
 }
+.area-block.capped .area-toggle {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+.area-block.expanded .area-toggle {
+  position: sticky;
+  inset-inline: auto;
+  border-top-left-radius: 8px;
+  border-top-right-radius: 8px;
+}
 .area-toggle:hover {
   background: rgba(28, 34, 52, 0.95);
   border-color: #33406b;
