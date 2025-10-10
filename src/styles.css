@@ -72,6 +72,21 @@ textarea {
   padding: 10px 12px;
   outline: none;
 }
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  padding-right: 36px; /* room for arrow */
+  position: relative;
+  background-image: linear-gradient(transparent, transparent),
+    url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="%23c9d5ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>');
+  background-repeat: no-repeat, no-repeat;
+  background-position: right 10px center, right 10px center;
+  background-size: 16px 16px, 16px 16px;
+}
+.row-8 select.input {
+  border-width: 1px;
+}
 textarea {
   min-height: 120px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
@@ -539,6 +554,12 @@ button:focus-visible,
 }
 /* Vertical stack container for sections */
 .stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.panel-gen {
   display: flex;
   flex-direction: column;
   gap: 16px;
