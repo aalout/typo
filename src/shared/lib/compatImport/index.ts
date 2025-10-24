@@ -1,0 +1,1 @@
+export { parseCompatCss } from "./compatImport";

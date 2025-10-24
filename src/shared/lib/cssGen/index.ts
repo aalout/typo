@@ -1,0 +1,1 @@
+export { generateCss } from "./cssGen";

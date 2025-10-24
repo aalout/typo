@@ -1,0 +1,1 @@
+export { TypoPage } from "./ui";
